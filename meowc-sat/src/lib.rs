@@ -5,5 +5,6 @@
 extern crate pest_derive;
 
 pub mod dimacs_cnf;
+mod luby;
 pub mod solver;
-mod types;
+pub mod types;

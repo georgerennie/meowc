@@ -10,4 +10,5 @@ fn main() {
 	let mut solver = meowc_sat::dimacs_cnf::parse_dimacs(&contents).unwrap();
 
 	println!("{:?}", solver.solve());
+	solver.print_stats();
 }

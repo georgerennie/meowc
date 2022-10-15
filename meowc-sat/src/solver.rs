@@ -1,11 +1,20 @@
-use crate::types::{Clause, ClauseId, DecisionLevel, Lit, SatResult, VarId};
+use crate::{
+	luby::Luby,
+	types::{Clause, ClauseId, DecisionLevel, Lit, SatResult, VarId},
+};
+
+const RESTART_SCALE: u64 = 512;
 
 #[derive(Clone)]
 pub struct Solver {
 	clauses: Vec<Clause>,
 
+	decision_level: DecisionLevel,
 	num_vars: u32,
 	num_assigned: u32,
+	conflicts: u64,
+	next_restart: u64,
+	restarts: u64,
 
 	assignments: Vec<Option<bool>>,
 	decision_levels: Vec<DecisionLevel>,
@@ -15,6 +24,8 @@ pub struct Solver {
 
 	frequencies: Vec<i32>,
 	frequencies_cache: Vec<i32>,
+
+	luby: Luby,
 }
 
 impl Solver {
@@ -25,8 +36,12 @@ impl Solver {
 		Self {
 			clauses: vec![],
 
+			decision_level: 0,
 			num_vars,
 			num_assigned: 0,
+			conflicts: 0,
+			next_restart: RESTART_SCALE,
+			restarts: 0,
 
 			assignments: vec![None; num_vars as usize],
 			decision_levels: vec![0; num_vars as usize],
@@ -35,6 +50,8 @@ impl Solver {
 			phases: vec![false; num_vars as usize],
 			frequencies: vec![0; num_vars as usize],
 			frequencies_cache: vec![0; num_vars as usize],
+
+			luby: Default::default(),
 		}
 	}
 
@@ -44,27 +61,39 @@ impl Solver {
 	}
 
 	pub fn solve(&mut self) -> SatResult {
-		let mut level = 0;
+		self.decision_level = 0;
 
-		if let Err(_) = self.unit_propagate(level) {
+		if let Err(_) = self.unit_propagate() {
 			return SatResult::Unsat;
 		}
 
 		while !self.all_assigned() {
-			level += 1;
+			self.decision_level += 1;
 
-			self.assign(self.choose_assignment(), level, -1);
+			self.assign(self.choose_assignment(), -1);
 
-			while let Err(conflict_clause) = self.unit_propagate(level) {
-				if level == 0 {
+			while let Err(conflict_clause) = self.unit_propagate() {
+				if self.decision_level == 0 {
 					return SatResult::Unsat;
 				}
 
-				level = self.conflict_analysis(level, conflict_clause);
+				self.conflict_analysis(conflict_clause);
+				self.conflicts += 1;
+
+				if self.should_restart() {
+					self.restarts += 1;
+					self.backtrack(0);
+				}
 			}
 		}
 
 		SatResult::Sat
+	}
+
+	pub fn print_stats(&self) {
+		println!("{} final clauses", self.clauses.len());
+		println!("{} conflicts", self.conflicts);
+		println!("{} restarts", self.restarts);
 	}
 
 	pub fn add_clause(&mut self, clause: &Clause) {
@@ -80,7 +109,17 @@ impl Solver {
 		self.clauses.push(clause.to_vec());
 	}
 
-	fn unit_propagate(&mut self, level: DecisionLevel) -> Result<(), ClauseId> {
+	fn should_restart(&mut self) -> bool {
+		let should_restart = self.conflicts >= self.next_restart;
+		if should_restart {
+			self.next_restart =
+				self.conflicts + self.luby.next() * RESTART_SCALE;
+		}
+
+		should_restart
+	}
+
+	fn unit_propagate(&mut self) -> Result<(), ClauseId> {
 		'outer_loop: loop {
 			'clause_loop: for (clause_id, clause) in
 				self.clauses.iter().enumerate()
@@ -114,11 +153,7 @@ impl Solver {
 				}
 
 				// Unit clause
-				self.assign(
-					unassigned_lit.unwrap(),
-					level,
-					clause_id as ClauseId,
-				);
+				self.assign(unassigned_lit.unwrap(), clause_id as ClauseId);
 				continue 'outer_loop;
 			}
 
@@ -128,10 +163,10 @@ impl Solver {
 		}
 	}
 
-	fn assign(&mut self, lit: Lit, level: DecisionLevel, antecedent: ClauseId) {
+	fn assign(&mut self, lit: Lit, antecedent: ClauseId) {
 		let var = lit.var();
 		self.assignments[var] = Some(lit.as_bool());
-		self.decision_levels[var] = level;
+		self.decision_levels[var] = self.decision_level;
 		self.antecedents[var] = antecedent;
 		self.frequencies[var] = -1;
 		self.num_assigned += 1;
@@ -148,25 +183,25 @@ impl Solver {
 		self.num_assigned -= 1;
 	}
 
-	fn conflict_analysis(
-		&mut self,
-		conflict_level: DecisionLevel,
-		conflict_id: ClauseId,
-	) -> DecisionLevel {
-		let learnt_clause =
-			self.derive_1uip_clause(conflict_level, conflict_id);
+	fn conflict_analysis(&mut self, conflict_id: ClauseId) {
+		let learnt_clause = self.derive_1uip_clause(conflict_id);
 
 		self.add_clause(&learnt_clause);
 
 		// Find greatest decision level below conflict decision level that
 		// assigns to the learnt clause for backgracking
-		let backtrack_level = learnt_clause
-			.iter()
-			.map(|lit| self.decision_levels[lit.var() as usize])
-			.filter(|&level| level < conflict_level)
-			.max()
-			.unwrap_or(0);
+		self.backtrack(
+			learnt_clause
+				.iter()
+				.map(|lit| self.decision_levels[lit.var() as usize])
+				.filter(|&level| level < self.decision_level)
+				.max()
+				.unwrap_or(0),
+		);
+	}
 
+	/// Backtracks to self.decision_level
+	fn backtrack(&mut self, backtrack_level: DecisionLevel) {
 		// TODO: Can this be iterators?
 		for var in 0..self.decision_levels.len() {
 			if self.decision_levels[var] > backtrack_level {
@@ -174,14 +209,10 @@ impl Solver {
 			}
 		}
 
-		backtrack_level
+		self.decision_level = backtrack_level;
 	}
 
-	fn derive_1uip_clause(
-		&mut self,
-		conflict_level: DecisionLevel,
-		conflict_id: ClauseId,
-	) -> Clause {
+	fn derive_1uip_clause(&mut self, conflict_id: ClauseId) -> Clause {
 		let mut learnt_clause = self.clauses[conflict_id as usize].clone();
 
 		loop {
@@ -193,7 +224,7 @@ impl Solver {
 
 				// Only consider literals assigned at the conflict decicision
 				// level
-				if self.decision_levels[var] != conflict_level {
+				if self.decision_levels[var] != self.decision_level {
 					continue;
 				}
 
@@ -210,6 +241,7 @@ impl Solver {
 				break;
 			}
 
+			debug_assert!(resolvent_lit.is_some());
 			learnt_clause = self.resolve(&learnt_clause, unsafe {
 				resolvent_lit.unwrap_unchecked()
 			});
