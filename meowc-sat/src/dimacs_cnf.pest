@@ -1,0 +1,21 @@
+dimacs  = {
+	SOI ~
+	(comment ~ NEWLINE*)* ~
+	(problem_statement ~ NEWLINE*) ~
+	(clause ~ NEWLINE*)* ~
+	EOI
+}
+
+comment = ${ "c" ~ comment_text }
+comment_text = @{ (!NEWLINE ~ ANY)* }
+
+problem_statement = { "p" ~ problem_type? ~ num_variables ~ num_clauses }
+// TODO: should this support sat mode?
+problem_type = { "cnf" }
+num_variables = @{ ASCII_DIGIT* }
+num_clauses = @{ ASCII_DIGIT* }
+
+clause = { (literal ~ NEWLINE*)+ ~ ("0" | EOI) }
+literal = @{ "-"? ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
+
+WHITESPACE = _{ " " | "\t" }

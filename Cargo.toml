@@ -3,3 +3,7 @@
 members = [
 	"meowc-sat",
 ]
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

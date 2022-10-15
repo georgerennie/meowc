@@ -1,14 +1,9 @@
-pub fn add(left: usize, right: usize) -> usize {
-	left + right
-}
+// TODO: Get rid of this
+#![allow(dead_code)]
 
-#[cfg(test)]
-mod tests {
-	use super::*;
+#[macro_use]
+extern crate pest_derive;
 
-	#[test]
-	fn it_works() {
-		let result = add(2, 2);
-		assert_eq!(result, 4);
-	}
-}
+pub mod dimacs_cnf;
+pub mod solver;
+mod types;
