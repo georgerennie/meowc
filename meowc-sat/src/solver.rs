@@ -1,5 +1,6 @@
 use crate::types::{Clause, ClauseId, DecisionLevel, Lit, SatResult, VarId};
 
+#[derive(Clone)]
 pub struct Solver {
 	clauses: Vec<Clause>,
 
@@ -10,9 +11,10 @@ pub struct Solver {
 	decision_levels: Vec<DecisionLevel>,
 	antecedents: Vec<ClauseId>,
 
+	phases: Vec<bool>,
+
 	frequencies: Vec<i32>,
 	frequencies_cache: Vec<i32>,
-	polarities: Vec<i32>,
 }
 
 impl Solver {
@@ -30,9 +32,9 @@ impl Solver {
 			decision_levels: vec![0; num_vars as usize],
 			antecedents: vec![-1; num_vars as usize],
 
+			phases: vec![false; num_vars as usize],
 			frequencies: vec![0; num_vars as usize],
 			frequencies_cache: vec![0; num_vars as usize],
-			polarities: vec![0; num_vars as usize],
 		}
 	}
 
@@ -69,7 +71,6 @@ impl Solver {
 		for lit in clause.iter() {
 			let var = lit.var();
 
-			self.polarities[var] += if lit.as_bool() { 1 } else { -1 };
 			if self.frequencies[var] != -1 {
 				self.frequencies[var] += 1;
 			}
@@ -137,6 +138,10 @@ impl Solver {
 	}
 
 	fn unassign(&mut self, var: VarId) {
+		if let Some(assignment) = self.assignments[var] {
+			self.phases[var] = assignment;
+		}
+
 		self.assignments[var] = None;
 		self.antecedents[var] = -1;
 		self.frequencies[var] = self.frequencies_cache[var];
@@ -245,6 +250,6 @@ impl Solver {
 			.unwrap()
 			.0;
 
-		Lit::from((var, self.polarities[var] >= 0))
+		Lit::from((var, self.phases[var]))
 	}
 }
