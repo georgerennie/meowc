@@ -1,0 +1,54 @@
+[env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+
+[tasks.build]
+disabled = true
+
+[tasks.fmt]
+disabled = true
+
+[tasks.test]
+disabled = true
+
+[tasks.creusot-meowc-check]
+workspace = false
+command = "cargo"
+args = ["creusot", "--", "-p", "meowc-check", "--features=contracts", "--features", "${@}"]
+
+[tasks.move-meowc-check]
+workspace = false
+script = '''
+[ ! -f ./target/debug/meowc_check-rlib.mlcfg ] || cp ./target/debug/meowc_check-rlib.mlcfg ./why3/mlcfgs/meowc-check.mlcfg
+'''
+
+[tasks.gen-cfg-meowc-check]
+workspace = false
+dependencies = [
+    "creusot-meowc-check",
+    "move-meowc-check",
+]
+
+[tasks.ide-meowc-check]
+workspace = false
+script = '''
+./why3/ide ./why3/mlcfgs/meowc-check.mlcfg
+'''
+
+[tasks.prove-meowc-check]
+workspace = false
+dependencies = [
+    "gen-cfg-meowc-check",
+    "ide-meowc-check",
+]
+
+[tasks.clean-meowc-check]
+workspace = false
+script = '''
+rm -rf mlcfgs/why3/meowc-check*
+'''
+
+[tasks.clean-proofs]
+workspace = false
+dependencies = [
+    "clean-meowc-check",
+]

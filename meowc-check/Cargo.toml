@@ -1,0 +1,10 @@
+[package]
+name = "meowc-check"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+creusot-contracts = { git = "https://github.com/xldenis/creusot", rev = "8342c2c", version = "^0" }
+
+[features]
+contracts = ["creusot-contracts/contracts"]
