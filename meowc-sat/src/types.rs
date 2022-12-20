@@ -11,6 +11,19 @@ pub enum SatResult {
 	Unsat,
 }
 
+impl fmt::Display for SatResult {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"{}",
+			match self {
+				SatResult::Sat => "SATISFIABLE",
+				SatResult::Unsat => "UNSATISFIABLE",
+			}
+		)
+	}
+}
+
 /// Literal encoded in u32 such that n in DIMACS is (n << 1) + 1 and -n in
 /// DIMACS is (n << 1)
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

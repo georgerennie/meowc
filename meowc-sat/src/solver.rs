@@ -1,5 +1,6 @@
 use crate::{
 	luby::Luby,
+	stats::Stats,
 	types::{Clause, ClauseId, DecisionLevel, Lit, SatResult, VarId},
 };
 
@@ -12,9 +13,7 @@ pub struct Solver {
 	decision_level: DecisionLevel,
 	num_vars: u32,
 	num_assigned: u32,
-	conflicts: u64,
 	next_restart: u64,
-	restarts: u64,
 
 	assignments: Vec<Option<bool>>,
 	decision_levels: Vec<DecisionLevel>,
@@ -26,6 +25,8 @@ pub struct Solver {
 	frequencies_cache: Vec<i32>,
 
 	luby: Luby,
+
+	stats: Stats,
 }
 
 impl Solver {
@@ -39,9 +40,7 @@ impl Solver {
 			decision_level: 0,
 			num_vars,
 			num_assigned: 0,
-			conflicts: 0,
 			next_restart: RESTART_SCALE,
-			restarts: 0,
 
 			assignments: vec![None; num_vars as usize],
 			decision_levels: vec![0; num_vars as usize],
@@ -52,7 +51,14 @@ impl Solver {
 			frequencies_cache: vec![0; num_vars as usize],
 
 			luby: Default::default(),
+
+			stats: Default::default(),
 		}
+	}
+
+	#[inline]
+	pub fn print_stats(&self) {
+		self.stats.print_summary();
 	}
 
 	#[inline]
@@ -78,22 +84,16 @@ impl Solver {
 				}
 
 				self.conflict_analysis(conflict_clause);
-				self.conflicts += 1;
+				self.stats.conflicts += 1;
 
 				if self.should_restart() {
-					self.restarts += 1;
+					self.stats.restarts += 1;
 					self.backtrack(0);
 				}
 			}
 		}
 
 		SatResult::Sat
-	}
-
-	pub fn print_stats(&self) {
-		println!("{} final clauses", self.clauses.len());
-		println!("{} conflicts", self.conflicts);
-		println!("{} restarts", self.restarts);
 	}
 
 	pub fn add_clause(&mut self, clause: &Clause) {
@@ -110,10 +110,10 @@ impl Solver {
 	}
 
 	fn should_restart(&mut self) -> bool {
-		let should_restart = self.conflicts >= self.next_restart;
+		let should_restart = self.stats.conflicts >= self.next_restart;
 		if should_restart {
 			self.next_restart =
-				self.conflicts + self.luby.next() * RESTART_SCALE;
+				self.stats.conflicts + self.luby.next() * RESTART_SCALE;
 		}
 
 		should_restart
@@ -154,6 +154,7 @@ impl Solver {
 
 				// Unit clause
 				self.assign(unassigned_lit.unwrap(), clause_id as ClauseId);
+				self.stats.propagations += 1;
 				continue 'outer_loop;
 			}
 
