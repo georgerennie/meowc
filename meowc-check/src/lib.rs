@@ -9,7 +9,7 @@ use creusot_contracts::*;
 
 pub struct UncheckedAsn(Vec<Lit>);
 
-pub enum CheckRes {
+pub enum SatResult {
 	Inconsistent,
 	VarsOutOfRange,
 	Incomplete,
@@ -20,7 +20,7 @@ struct Assignment(Vec<Option<bool>>);
 
 struct Lit {
 	var: u32,
-	val: bool,
+	pol: bool,
 }
 
 struct Clause(Vec<Lit>);
@@ -38,12 +38,12 @@ impl Lit {
 
 	#[predicate]
 	fn conflicts_with(self, other: Lit) -> bool {
-		pearlite! { (self.var == other.var) && (self.val != other.val) }
+		pearlite! { (self.var == other.var) && (self.pol != other.pol) }
 	}
 
 	#[predicate]
 	fn sat_asn(self, assignment: Assignment) -> bool {
-		pearlite! { (@assignment.0)[@self.var] == Some(self.val) }
+		pearlite! { (@assignment.0)[@self.var] == Some(self.pol) }
 	}
 
 	#[predicate]
@@ -108,7 +108,6 @@ impl Formula {
 }
 
 impl UncheckedAsn {
-	/// Returns true if each variable up to idx only appears once in the assignment
 	#[predicate]
 	fn consistent_up_to(self, idx: Int) -> bool {
 		pearlite! {
@@ -118,7 +117,6 @@ impl UncheckedAsn {
 		}
 	}
 
-	/// Returns true if each variable only appears once in the assignment
 	#[predicate]
 	fn consistent(self) -> bool {
 		// TODO: It would be nice to define this as forall i < self.0.len()
@@ -127,7 +125,6 @@ impl UncheckedAsn {
 		pearlite! { self.consistent_up_to((@self.0).len()) }
 	}
 
-	/// Returns true if the variables with index below idx are all below num_vars
 	#[predicate]
 	fn vars_in_range_up_to(self, num_vars: Int, idx: Int) -> bool {
 		pearlite! {
@@ -136,14 +133,11 @@ impl UncheckedAsn {
 		}
 	}
 
-	/// Returns true if all variables are in the range of num_vars
 	#[predicate]
 	fn vars_in_range(self, num_vars: Int) -> bool {
 		pearlite! { self.vars_in_range_up_to(num_vars, (@self.0).len()) }
 	}
 
-	/// Returns true if all assignments correspond to an assignment in self up
-	/// to idx
 	#[predicate]
 	fn maps_to_assignment_vector_up_to(
 		self,
@@ -157,11 +151,10 @@ impl UncheckedAsn {
 				(exists<v: _> assign[i] == Some(v)) ==
 				(exists<j: _> 0 <= j && j < idx &&
 					(       i  ==     @values[j].var) &&
-					(assign[i] == Some(values[j].val)))
+					(assign[i] == Some(values[j].pol)))
 		}
 	}
 
-	/// Returns true if all assignments correspond to an assignment in self
 	#[predicate]
 	fn maps_to_assignment_vector(self, assignment: Assignment) -> bool {
 		pearlite! {
@@ -174,7 +167,7 @@ impl UncheckedAsn {
 		pearlite! {
 			forall<i: _> 0 <= i && i < idx ==> exists<v: _>
 				(@assignment.0)[@(@self.0)[i].var] == Some(v) &&
-				v == (@self.0)[i].val
+				v == (@self.0)[i].pol
 		}
 	}
 
@@ -186,58 +179,61 @@ impl UncheckedAsn {
 	}
 
 	#[ensures(match result {
-		Ok(_)                         => { self.vars_in_range(@num_vars) && self.consistent() }
-		Err(CheckRes::Inconsistent)   => { !self.consistent() }
-		Err(CheckRes::VarsOutOfRange) => { !self.vars_in_range(@num_vars) }
-		_                             => false
+		Ok(_)                          => { self.vars_in_range(@num_vars) && self.consistent() }
+		Err(SatResult::Inconsistent)   => { !self.consistent() }
+		Err(SatResult::VarsOutOfRange) => { !self.vars_in_range(@num_vars) }
+		_                              => false
 	})]
-	#[ensures(forall<a: Assignment> result == Ok(a) ==> (@a.0).len() == @num_vars)]
-	#[ensures(forall<a: Assignment> result == Ok(a) ==> self.maps_to_assignment_vector(a))]
-	#[ensures(forall<a: Assignment> result == Ok(a) ==> self.maps_to_some(a))]
-	fn to_assignment_vec(&self, num_vars: u32) -> Result<Assignment, CheckRes> {
-		let mut asns = vec![None; num_vars as usize];
+	#[ensures(forall<a: _> result == Ok(a) ==> (@a.0).len() == @num_vars)]
+	#[ensures(forall<a: _> result == Ok(a) ==> self.maps_to_assignment_vector(a))]
+	#[ensures(forall<a: _> result == Ok(a) ==> self.maps_to_some(a))]
+	fn to_assignment_vec(
+		&self,
+		num_vars: u32,
+	) -> Result<Assignment, SatResult> {
+		let mut assignment = vec![None; num_vars as usize];
 
-		#[invariant(assignment_len_const, (@asns).len() == @num_vars)]
+		#[invariant(assignment_len_const, (@assignment).len() == @num_vars)]
 		#[invariant(iter_bounded, produced.len() <= (@self.0).len())]
 		#[invariant(consistent, self.consistent_up_to(produced.len()))]
 		#[invariant(vars_in_range, self.vars_in_range_up_to(@num_vars, produced.len()))]
-		#[invariant(mappings_valid, self.maps_to_assignment_vector_up_to(Assignment(asns), produced.len()))]
-		#[invariant(mappings_valid_2, self.maps_to_some_up_to(Assignment(asns), produced.len()))]
+		#[invariant(mappings_valid, self.maps_to_assignment_vector_up_to(Assignment(assignment), produced.len()))]
+		#[invariant(mappings_valid_2, self.maps_to_some_up_to(Assignment(assignment), produced.len()))]
 		for lit in self.0.iter() {
 			proof_assert!(*lit == (@self.0)[produced.len() - 1]);
 
 			if lit.var >= num_vars {
-				return Err(CheckRes::VarsOutOfRange);
+				return Err(SatResult::VarsOutOfRange);
 			}
 
-			if let Some(assigned_val) = asns[lit.var as usize] {
-				if assigned_val != lit.val {
-					return Err(CheckRes::Inconsistent);
+			if let Some(assigned_pol) = assignment[lit.var as usize] {
+				if assigned_pol != lit.pol {
+					return Err(SatResult::Inconsistent);
 				}
 			}
 
-			asns[lit.var as usize] = Some(lit.val);
+			assignment[lit.var as usize] = Some(lit.pol);
 		}
 
-		Ok(Assignment(asns))
+		Ok(Assignment(assignment))
 	}
 }
 
 impl Formula {
 	#[maintains(self.invariant())]
 	#[ensures(match result {
-		CheckRes::Inconsistent   => { !input_assignment.consistent() }
-		CheckRes::VarsOutOfRange => { !input_assignment.vars_in_range(@self.num_vars) }
-		_                        => { input_assignment.consistent() && input_assignment.vars_in_range(@self.num_vars) }
+		SatResult::Inconsistent   => { !input_assignment.consistent() }
+		SatResult::VarsOutOfRange => { !input_assignment.vars_in_range(@self.num_vars) }
+		_                         => { input_assignment.consistent() && input_assignment.vars_in_range(@self.num_vars) }
 	})]
-	#[ensures(result == CheckRes::Verified   ==> self.sat(*input_assignment))]
-	#[ensures(result == CheckRes::Incomplete ==> !self.sat(*input_assignment))]
-	pub fn check_sat(&self, input_assignment: &UncheckedAsn) -> CheckRes {
+	#[ensures(result == SatResult::Verified   ==> self.sat(*input_assignment))]
+	#[ensures(result == SatResult::Incomplete ==> !self.sat(*input_assignment))]
+	pub fn check_sat(&self, input_assignment: &UncheckedAsn) -> SatResult {
 		match input_assignment.to_assignment_vec(self.num_vars) {
 			Err(e) => e,
 			Ok(assignment) => {
 				let res = self.is_sat(&assignment);
-				proof_assert!(res == CheckRes::Verified ==> self.sat(*input_assignment));
+				proof_assert!(res == SatResult::Verified ==> self.sat(*input_assignment));
 				res
 			}
 		}
@@ -246,11 +242,11 @@ impl Formula {
 	#[requires((@assignment.0).len() == @self.num_vars)]
 	#[requires(self.invariant())]
 	#[ensures(match result {
-		CheckRes::Verified   => {  self.sat_asn(*assignment) }
-		CheckRes::Incomplete => { !self.sat_asn(*assignment) }
+		SatResult::Verified   => {  self.sat_asn(*assignment) }
+		SatResult::Incomplete => { !self.sat_asn(*assignment) }
 		_                    => false
 	})]
-	fn is_sat(&self, assignment: &Assignment) -> CheckRes {
+	fn is_sat(&self, assignment: &Assignment) -> SatResult {
 		#[invariant(iter_bounded, produced.len() <= (@self.clauses).len())]
 		#[invariant(prev_clauses_sat,
 			forall<j: _> 0 <= j && j < produced.len() ==>
@@ -269,10 +265,8 @@ impl Formula {
 			for lit in clause.0.iter() {
 				proof_assert!(*lit == (@clause.0)[produced.len() - 1]);
 
-				let asn = assignment.0[lit.var as usize];
-
-				if let Some(asn_val) = asn {
-					if asn_val == lit.val {
+				if let Some(assigned_pol) = assignment.0[lit.var as usize] {
+					if assigned_pol == lit.pol {
 						clause_sat = true;
 						break;
 					}
@@ -280,10 +274,10 @@ impl Formula {
 			}
 
 			if !clause_sat {
-				return CheckRes::Incomplete;
+				return SatResult::Incomplete;
 			}
 		}
 
-		return CheckRes::Verified;
+		return SatResult::Verified;
 	}
 }
