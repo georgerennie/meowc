@@ -62,6 +62,17 @@ impl Solver {
 	}
 
 	#[inline]
+	pub fn print_assignment(&self) {
+		print!("v ");
+		for (var, assignment) in self.assignments.iter().enumerate().skip(1) {
+			if let Some(pol) = assignment {
+				print!("{} ", Lit::from((var, *pol)));
+			}
+		}
+		println!("0");
+	}
+
+	#[inline]
 	fn all_assigned(&self) -> bool {
 		self.num_assigned == self.num_vars
 	}
