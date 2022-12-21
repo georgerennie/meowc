@@ -20,7 +20,8 @@ c nyaa~ :3
 c"
 	);
 
-	println!("c Solving...");
+	println!("c ------------------------- Solving --------------------------");
+	solver.print_problem_stats();
 	let result = solver.solve();
 	println!("c -------------------------- Stats ---------------------------");
 	solver.print_stats();

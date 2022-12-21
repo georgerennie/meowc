@@ -57,6 +57,12 @@ impl Solver {
 	}
 
 	#[inline]
+	pub fn print_problem_stats(&self) {
+		println!("c variables: {:9}", self.num_vars);
+		println!("c   clauses: {:9}", self.clauses.len());
+	}
+
+	#[inline]
 	pub fn print_stats(&self) {
 		self.stats.print_summary();
 	}
