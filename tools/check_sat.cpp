@@ -14,6 +14,13 @@
 #include <vector>
 #include "sat.hpp"
 
+// Thoughts: DIMACS parsing takes way longer than proof checking. It also uses
+// a ton of memory. We could stream the dimacs in, and check each clause as it
+// comes in, preventing the need to store the whole formula in memory. This is
+// a nice optimisation as it reduces the amount of memory needed and means in
+// the case of early exit you dont have to parse everything, but is potentially
+// harder to formalise
+
 static AssignmentVec to_assignment_vec(const Assignment& assignment, const std::size_t num_vars) {
 	AssignmentVec assignment_vec{num_vars + 1, TriBool::None};
 
@@ -50,7 +57,9 @@ static bool is_sat(const Formula& formula, const AssignmentVec& assignment) {
 	return true;
 }
 
-static bool check_sat(const Formula& formula, const Assignment& assignment, const std::size_t num_vars) {
+static bool check_sat(
+    const Formula& formula, const Assignment& assignment, const std::size_t num_vars
+) {
 	return is_sat(formula, to_assignment_vec(assignment, num_vars));
 }
 
@@ -99,13 +108,16 @@ int main(int argc, char* argv[]) {
 	const auto num_variables = std::get<1>(formula_pair);
 	dimacs.close();
 
+	const auto done_dimacs = std::chrono::high_resolution_clock::now();
+
 	std::ifstream proof;
 	proof.open(argv[2]);
 	const auto assignment = parse_assignment(proof, num_variables);
 	proof.close();
 
+	const auto done_proof = std::chrono::high_resolution_clock::now();
+
 	// Parsing is way slower than solving
-	const auto done_parsing = std::chrono::high_resolution_clock::now();
 	const auto sat          = check_sat(std::get<0>(formula_pair), assignment, num_variables);
 	const auto done_solving = std::chrono::high_resolution_clock::now();
 
@@ -114,10 +126,13 @@ int main(int argc, char* argv[]) {
 	else
 		std::cout << "NOT VERIFIED" << std::endl;
 
-	const auto parsing_time =
-	    std::chrono::duration_cast<std::chrono::milliseconds>(done_parsing - start);
+	const auto dimacs_time =
+	    std::chrono::duration_cast<std::chrono::milliseconds>(done_dimacs - start);
+	const auto proof_parse_time =
+	    std::chrono::duration_cast<std::chrono::milliseconds>(done_proof - done_dimacs);
 	const auto solving_time =
-	    std::chrono::duration_cast<std::chrono::milliseconds>(done_solving - done_parsing);
-	std::cout << "Parsing took " << parsing_time.count() << " milliseconds" << std::endl;
+	    std::chrono::duration_cast<std::chrono::milliseconds>(done_solving - done_proof);
+	std::cout << "DIMACS Parsing took " << dimacs_time.count() << " milliseconds" << std::endl;
+	std::cout << "Proof Parsing took " << proof_parse_time.count() << " milliseconds" << std::endl;
 	std::cout << "Solving took " << solving_time.count() << " milliseconds" << std::endl;
 }

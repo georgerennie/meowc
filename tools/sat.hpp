@@ -1,13 +1,13 @@
 #pragma once
 
-#include <cstdint>
-#include <vector>
 #include <cassert>
-#include <tuple>
-#include <sstream>
+#include <cstdint>
 #include <fstream>
-#include <iterator>
 #include <iostream>
+#include <iterator>
+#include <sstream>
+#include <tuple>
+#include <vector>
 
 enum class TriBool : uint8_t {
 	None  = 0x00,
@@ -20,6 +20,13 @@ using AssignmentVec = std::vector<TriBool>;
 
 class Lit {
 public:
+	constexpr Lit(const int32_t dimacs_lit) : lit(0) {
+		assert(dimacs_lit != 0);
+		const bool is_pos = dimacs_lit > 0;
+		const Var  var    = is_pos ? dimacs_lit : -dimacs_lit;
+		lit               = var | (is_pos ? pos_mask : 0);
+	}
+
 	constexpr Lit(const Var var, const bool is_pos) : lit(var | (is_pos ? pos_mask : 0)) {
 		assert(var != 0);
 	}
@@ -80,22 +87,25 @@ inline std::tuple<Formula, std::size_t> parse_formula(std::ifstream& fs) {
 		throw std::runtime_error("Invalid line in CNF");
 	}
 
-	while (std::getline(fs, line)) {
-		Clause clause;
+	formula.reserve(num_clauses);
 
-		for (const auto& lit_str : split(line)) {
-			if (lit_str == "0")
-				continue;
-
-			const auto lit = Lit::make_lit(lit_str);
-			assert(lit.var() <= num_variables);
-			clause.emplace_back(lit);
+	int    lit_int;
+	Clause clause;
+	while (fs >> lit_int) {
+		if (lit_int == 0) {
+			formula.emplace_back(std::move(clause));
+			clause.clear();
+			continue;
 		}
 
-		formula.emplace_back(std::move(clause));
+		Lit lit{lit_int};
+		assert(lit.var() <= num_variables);
+		clause.emplace_back(lit);
 	}
+
+	if (!clause.empty())
+		formula.emplace_back(std::move(clause));
 
 	assert(formula.size() == num_clauses);
 	return std::make_pair(std::move(formula), num_variables);
 }
-
