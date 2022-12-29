@@ -3,3 +3,4 @@
 !.clang-format
 !*.hpp
 !*.cpp
+!Makefile
