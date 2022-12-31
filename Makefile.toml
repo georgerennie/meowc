@@ -13,7 +13,7 @@ disabled = true
 [tasks.creusot-meowc-check]
 workspace = false
 command = "cargo"
-args = ["creusot", "--", "-p", "meowc-check", "--features=contracts", "--features", "${@}"]
+args = ["creusot", "--", "-p", "meowc-check", "--features=contracts"]
 
 [tasks.move-meowc-check]
 workspace = false
