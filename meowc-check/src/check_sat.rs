@@ -1,5 +1,13 @@
 extern crate creusot_contracts;
-use creusot_contracts::{invariant::Invariant, *};
+use creusot_contracts::{
+	ensures, invariant, logic, predicate, proof_assert, requires, DeepModel,
+	ShallowModel,
+};
+
+#[cfg(feature = "contracts")]
+use creusot_contracts::{
+	ghost, invariant::Invariant, pearlite, Int, Iterator, Seq,
+};
 
 #[predicate]
 fn iter_consumed<I: Iterator>(iter: I) -> bool {
@@ -16,11 +24,11 @@ pub enum SatResult {
 	Verified,
 }
 
-type Var = u32;
-type RawLit = i32;
+pub type Var = u32;
+pub type RawLit = i32;
 
 #[derive(creusot_contracts::PartialEq, Eq, creusot_contracts::Clone, Copy)]
-struct Lit {
+pub struct Lit {
 	lit: RawLit,
 }
 
@@ -38,6 +46,12 @@ impl Lit {
 	#[predicate]
 	fn l_in_range(self, max_var: Int) -> bool {
 		pearlite! { self.l_variable() <= max_var }
+	}
+
+	#[predicate]
+	fn conflicts_with(self, other: Lit) -> bool {
+		self.l_variable() == other.l_variable()
+			&& self.l_polarity() != other.l_polarity()
 	}
 
 	#[ensures(@result == self.l_variable())]
@@ -65,7 +79,7 @@ impl Lit {
 	}
 
 	#[ensures(result.lit == l)]
-	fn from_dimacs(l: RawLit) -> Lit {
+	pub fn from_dimacs_unchecked(l: RawLit) -> Lit {
 		Self { lit: l }
 	}
 
@@ -124,6 +138,25 @@ impl Assignment {
 		}
 	}
 
+	#[predicate]
+	fn consistent(lits: Seq<Lit>) -> bool {
+		pearlite! {
+			// TODO: change j < i to j < lits.len() && j != i
+			forall<i: _, j: _> 0 <= i && i < lits.len() && 0 <= j && j < i ==>
+				!lits[i].conflicts_with(lits[j])
+		}
+	}
+
+	#[predicate]
+	fn maps_to_some(lits: Seq<Lit>, assignment: Seq<Option<bool>>) -> bool {
+		pearlite! {
+			forall<i: _> 0 <= i && i < lits.len() ==>
+			exists<v: _>
+				assignment[lits[i].l_variable()] == Some(v) &&
+				v == lits[i].l_polarity()
+		}
+	}
+
 	#[requires(lits.invariant())]
 	#[ensures(match result {
 		Ok(_) => Self::vars_in_range(lits, @max_var),
@@ -133,6 +166,10 @@ impl Assignment {
 	})]
 	#[ensures(forall<a: _> result == Ok(a) ==> (@a.state).len() == @max_var + 1)]
 	#[ensures(forall<a: _> result == Ok(a) ==> iter_consumed(lits))]
+	#[ensures(forall<a: _> result == Ok(a) ==>
+		exists<fin: &mut I, seq: _> lits.produces(seq, *fin) &&
+			fin.completed() && Self::maps_to_some(seq, @a.state)
+	)]
 	fn from_unchecked_lits<I: Iterator<Item = Lit>>(
 		lits: I,
 		max_var: Var,
@@ -142,6 +179,7 @@ impl Assignment {
 		#[invariant(iter_invar, iter.invariant())]
 		#[invariant(assignment_len_const, (@assignment).len() == @max_var + 1)]
 		#[invariant(vars_in_range, vars_in_range(produced.inner(), @max_var))]
+		#[invariant(maps_to_some, Self::maps_to_some(produced.inner(), @assignment))]
 		for lit in lits {
 			if !lit.in_range(max_var) {
 				proof_assert!(!produced[produced.len() - 1].l_in_range(@max_var));
@@ -176,6 +214,9 @@ impl Assignment {
 	}
 }
 
+pub type Clause = Vec<Lit>;
+
+// TODO: Check that the right number of clauses are read
 #[requires(clauses.invariant())]
 #[requires(proof.invariant())]
 #[ensures(result == SatResult::Verified ==> iter_consumed(clauses) && iter_consumed(proof))]
@@ -187,13 +228,13 @@ impl Assignment {
 	exists<fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) && fin.completed() &&
 		forall<i: _> 0 <= i && i < seq.len() ==> vars_in_range(@seq[i], @max_var)
 )]
-fn check_sat<ClauseIt, ProofIt>(
+pub fn check_sat<ClauseIt, ProofIt>(
 	clauses: ClauseIt,
 	proof: ProofIt,
 	max_var: Var,
 ) -> SatResult
 where
-	ClauseIt: Iterator<Item = Vec<Lit>>,
+	ClauseIt: Iterator<Item = Clause>,
 	ProofIt: Iterator<Item = Lit>,
 {
 	let assignment = match Assignment::from_unchecked_lits(proof, max_var) {
