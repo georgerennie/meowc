@@ -1,3 +1,4 @@
+use anyhow::Result;
 use meowc_check_core::check_sat::{Clause, Lit, RawLit, Var};
 use std::{
 	fs::File,
@@ -7,13 +8,12 @@ use std::{
 
 pub fn dimacs_iter<P: AsRef<Path>>(
 	filename: P,
-) -> (impl Iterator<Item = Clause>, Var) {
-	let lines = BufReader::new(File::open(filename).unwrap()).lines();
+) -> Result<(impl Iterator<Item = Clause>, Var)> {
+	let lines = BufReader::new(File::open(filename)?).lines();
 	let mut lines = lines.skip_while(|l| l.as_ref().unwrap().starts_with("c"));
 	let problem: Vec<String> = lines
 		.next()
-		.unwrap()
-		.unwrap()
+		.unwrap()?
 		.split_whitespace()
 		.map(|s| s.to_string())
 		.collect();
@@ -22,9 +22,9 @@ pub fn dimacs_iter<P: AsRef<Path>>(
 	assert!(problem.len() == 4);
 	assert!(problem[0] == "p");
 	assert!(problem[1] == "cnf");
-	let variables = problem[2].parse::<u32>().unwrap();
+	let variables = problem[2].parse::<u32>()?;
 	// TODO: Check number of clauses is right
-	let _clauses = problem[3].parse::<u32>().unwrap();
+	let _clauses = problem[3].parse::<u32>()?;
 
 	// TODO: really we should iterate over numbers not lines, cos clauses can
 	// take multiple lines
@@ -41,11 +41,13 @@ pub fn dimacs_iter<P: AsRef<Path>>(
 			.collect::<Clause>()
 	});
 
-	(lines, variables)
+	Ok((lines, variables))
 }
 
-pub fn proof_iter<P: AsRef<Path>>(filename: P) -> impl Iterator<Item = Lit> {
-	BufReader::new(File::open(filename).unwrap())
+pub fn proof_iter<P: AsRef<Path>>(
+	filename: P,
+) -> Result<impl Iterator<Item = Lit>> {
+	Ok(BufReader::new(File::open(filename)?)
 		.lines()
 		.flat_map(|line| {
 			line.unwrap()
@@ -53,5 +55,5 @@ pub fn proof_iter<P: AsRef<Path>>(filename: P) -> impl Iterator<Item = Lit> {
 				.map(|lit| Lit::from_dimacs_unchecked(lit.parse().unwrap()))
 				// TODO: This seems nasty - can it be improved
 				.collect::<Vec<_>>()
-		})
+		}))
 }
