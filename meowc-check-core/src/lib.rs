@@ -6,9 +6,6 @@ extern crate creusot_contracts;
 
 pub mod check_sat;
 
-#[cfg(not(feature = "contracts"))]
-pub mod parse;
-
 // use creusot_contracts::std::*;
 // use creusot_contracts::*;
 

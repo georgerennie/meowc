@@ -1,13 +1,9 @@
-use meowc_check::check_sat::{check_sat, SatResult};
+use meowc_check_core::check_sat::{check_sat, SatResult};
 use std::env;
 
-#[cfg(not(feature = "contracts"))]
-use meowc_check::parse::{dimacs_iter, proof_iter};
+mod parse;
+use parse::{dimacs_iter, proof_iter};
 
-// TODO: Work out how to cleanly feature gate this stuff - maybe we should
-// split into two crates, one for the proven core and one for everything else
-
-#[cfg(not(feature = "contracts"))]
 fn main() {
 	let args: Vec<_> = env::args().collect();
 	assert!(args.len() == 3);
@@ -22,6 +18,3 @@ fn main() {
 		println!("s NOT VERIFIED");
 	}
 }
-
-#[cfg(feature = "contracts")]
-fn main() {}

@@ -1,4 +1,4 @@
-use crate::check_sat::{Clause, Lit, RawLit, Var};
+use meowc_check_core::check_sat::{Clause, Lit, RawLit, Var};
 use std::{
 	fs::File,
 	io::{BufRead, BufReader},
@@ -24,7 +24,7 @@ pub fn dimacs_iter<P: AsRef<Path>>(
 	assert!(problem[1] == "cnf");
 	let variables = problem[2].parse::<u32>().unwrap();
 	// TODO: Check number of clauses is right
-	let clauses = problem[3].parse::<u32>().unwrap();
+	let _clauses = problem[3].parse::<u32>().unwrap();
 
 	// TODO: really we should iterate over numbers not lines, cos clauses can
 	// take multiple lines

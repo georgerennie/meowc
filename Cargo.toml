@@ -2,7 +2,8 @@
 
 members = [
 	"meowc-sat",
-	"meowc-check"
+	"meowc-check",
+	"meowc-check-core"
 ]
 
 [profile.release-with-debug]

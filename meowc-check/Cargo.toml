@@ -4,7 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-creusot-contracts = { git = "https://github.com/xldenis/creusot", rev = "de082e619a55400e9b29c70a3959a6cfc60ef29c", version = "^0" }
-
-[features]
-contracts = ["creusot-contracts/contracts"]
+meowc-check-core = { path = "../meowc-check-core" }

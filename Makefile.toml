@@ -13,12 +13,12 @@ disabled = true
 [tasks.creusot-meowc-check]
 workspace = false
 command = "cargo"
-args = ["creusot", "--", "-p", "meowc-check", "--features=contracts"]
+args = ["creusot", "--", "-p", "meowc-check-core", "--features=contracts"]
 
 [tasks.move-meowc-check]
 workspace = false
 script = '''
-[ ! -f ./target/debug/meowc_check-rlib.mlcfg ] || cp ./target/debug/meowc_check-rlib.mlcfg ./why3/mlcfgs/meowc-check.mlcfg
+[ ! -f ./target/debug/meowc_check_core-rlib.mlcfg ] || cp ./target/debug/meowc_check_core-rlib.mlcfg ./why3/mlcfgs/meowc-check.mlcfg
 '''
 
 [tasks.gen-cfg-meowc-check]
