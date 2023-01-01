@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{arg, Parser, ValueHint::FilePath};
-use meowc_check_core::check_sat::{check_sat, SatResult};
+use meowc_check_core::check_sat::check_sat;
 use std::path::PathBuf;
 
 mod parse;
@@ -20,13 +20,13 @@ fn main() -> Result<()> {
 	println!("c Checking SAT proof");
 	let (dimacs, max_var) = dimacs_iter(args.dimacs_file)?;
 	let proof = proof_iter(args.proof_file)?;
-	let result = check_sat(dimacs, proof, max_var);
-
-	if let SatResult::Verified = result {
-		println!("s VERIFIED");
-	} else {
-		println!("s NOT VERIFIED");
-	};
+	match check_sat(dimacs, proof, max_var) {
+		Ok(_) => println!("s VERIFIED"),
+		Err(e) => {
+			println!("c {:?}", e);
+			println!("s NOT VERIFIED");
+		}
+	}
 
 	Ok(())
 }

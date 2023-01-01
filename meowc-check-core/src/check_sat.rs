@@ -17,11 +17,11 @@ fn iter_consumed<I: Iterator>(iter: I) -> bool {
 	}
 }
 
-pub enum SatResult {
+#[cfg_attr(not(feature = "contracts"), derive(Debug))]
+pub enum SatError {
 	Inconsistent,
 	VarOutOfRange,
 	Incorrect,
-	Verified,
 }
 
 pub type Var = u32;
@@ -160,8 +160,8 @@ impl Assignment {
 	#[requires(lits.invariant())]
 	#[ensures(match result {
 		Ok(_) => Self::vars_in_range(lits, @max_var),
-		Err(SatResult::Inconsistent) => true,
-		Err(SatResult::VarOutOfRange) => Self::some_var_not_in_range(lits, @max_var),
+		Err(SatError::Inconsistent) => true,
+		Err(SatError::VarOutOfRange) => Self::some_var_not_in_range(lits, @max_var),
 		_ => false
 	})]
 	#[ensures(forall<a: _> result == Ok(a) ==> (@a.state).len() == @max_var + 1)]
@@ -173,7 +173,7 @@ impl Assignment {
 	fn from_unchecked_lits<I: Iterator<Item = Lit>>(
 		lits: I,
 		max_var: Var,
-	) -> Result<Assignment, SatResult> {
+	) -> Result<Assignment, SatError> {
 		let mut assignment = vec![None; max_var as usize + 1];
 
 		#[invariant(iter_invar, iter.invariant())]
@@ -183,14 +183,14 @@ impl Assignment {
 		for lit in lits {
 			if !lit.in_range(max_var) {
 				proof_assert!(!produced[produced.len() - 1].l_in_range(@max_var));
-				return Err(SatResult::VarOutOfRange);
+				return Err(SatError::VarOutOfRange);
 			}
 
 			let (variable, polarity) = lit.var_pol();
 
 			if let Some(assigned_pol) = assignment[variable as usize] {
 				if assigned_pol != polarity {
-					return Err(SatResult::Inconsistent);
+					return Err(SatError::Inconsistent);
 				}
 			}
 
@@ -219,12 +219,12 @@ pub type Clause = Vec<Lit>;
 // TODO: Check that the right number of clauses are read
 #[requires(clauses.invariant())]
 #[requires(proof.invariant())]
-#[ensures(result == SatResult::Verified ==> iter_consumed(clauses) && iter_consumed(proof))]
-#[ensures(result == SatResult::Verified ==>
+#[ensures(result == Ok(()) ==> iter_consumed(clauses) && iter_consumed(proof))]
+#[ensures(result == Ok(()) ==>
 	exists<fin: &mut ProofIt, seq: _> proof.produces(seq, *fin) && fin.completed() &&
 		vars_in_range(seq, @max_var)
 )]
-#[ensures(result == SatResult::Verified ==>
+#[ensures(result == Ok(()) ==>
 	exists<fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) && fin.completed() &&
 		forall<i: _> 0 <= i && i < seq.len() ==> vars_in_range(@seq[i], @max_var)
 )]
@@ -232,13 +232,13 @@ pub fn check_sat<ClauseIt, ProofIt>(
 	clauses: ClauseIt,
 	proof: ProofIt,
 	max_var: Var,
-) -> SatResult
+) -> Result<(), SatError>
 where
 	ClauseIt: Iterator<Item = Clause>,
 	ProofIt: Iterator<Item = Lit>,
 {
 	let assignment = match Assignment::from_unchecked_lits(proof, max_var) {
-		Err(err) => return err,
+		Err(e) => return Err(e),
 		Ok(a) => a,
 	};
 
@@ -251,7 +251,7 @@ where
 		#[invariant(vars_in_range, vars_in_range(produced.inner(), @max_var))]
 		for lit in clause {
 			if !lit.in_range(max_var) {
-				return SatResult::VarOutOfRange;
+				return Err(SatError::VarOutOfRange);
 			}
 
 			if !clause_sat && assignment.satisfies(lit) {
@@ -260,9 +260,9 @@ where
 		}
 
 		if !clause_sat {
-			return SatResult::Incorrect;
+			return Err(SatError::Incorrect);
 		}
 	}
 
-	SatResult::Verified
+	Ok(())
 }
