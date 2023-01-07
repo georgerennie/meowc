@@ -10,10 +10,36 @@ use creusot_contracts::{
 };
 
 #[predicate]
+fn partial_seq<I, T>(iter: I, seq: Seq<T>) -> bool
+where
+	I: Iterator<Item = T>,
+{
+	pearlite! {
+		exists<fin: &mut I> iter.produces(seq, *fin)
+	}
+}
+
+#[predicate]
+fn complete_seq<I, T>(iter: I, seq: Seq<T>) -> bool
+where
+	I: Iterator<Item = T>,
+{
+	pearlite! {
+		exists<fin: &mut I> iter.produces(seq, *fin) && fin.completed()
+	}
+}
+
+#[predicate]
 fn iter_consumed<I: Iterator>(iter: I) -> bool {
 	pearlite! {
-		exists<fin: &mut I, seq: _>
-			iter.produces(seq, *fin) && fin.completed()
+		exists<seq: _> complete_seq(iter, seq)
+	}
+}
+
+#[predicate]
+fn is_ok<T, E>(value: Result<T, E>) -> bool {
+	pearlite! {
+		exists<t: _> value == Ok(t)
 	}
 }
 
@@ -121,6 +147,13 @@ fn vars_in_range(lits: Seq<Lit>, max_var: Int) -> bool {
 }
 
 #[predicate]
+fn clauses_vars_in_range(clauses: Seq<Clause>, max_var: Int) -> bool {
+	pearlite! {
+		forall<i: _> 0 <= i && i < clauses.len() ==> vars_in_range(@clauses[i], max_var)
+	}
+}
+
+#[predicate]
 fn consistent(lits: Seq<Lit>) -> bool {
 	pearlite! {
 		forall<i: _, j: _> 0 <= i && i < lits.len() && 0 <= j && j < lits.len() ==>
@@ -132,35 +165,31 @@ impl Assignment {
 	#[predicate]
 	fn vars_in_range<I: Iterator<Item = Lit>>(lits: I, max_var: Int) -> bool {
 		pearlite! {
-			exists<fin: &mut I, seq: _> lits.produces(seq, *fin) &&
-				fin.completed() && vars_in_range(seq, max_var)
+			exists<seq: _> complete_seq(lits, seq) && vars_in_range(seq, max_var)
 		}
 	}
 
 	#[predicate]
-	fn some_var_not_in_range<I: Iterator<Item = Lit>>(
-		lits: I,
-		max_var: Int,
-	) -> bool {
+	fn some_var_not_in_range<I>(lits: I, max_var: Int) -> bool
+	where
+		I: Iterator<Item = Lit>,
+	{
 		pearlite! {
-			exists<fin: &mut I, seq: _> lits.produces(seq, *fin) &&
-				!vars_in_range(seq, max_var)
+			exists<seq: _> partial_seq(lits, seq) && !vars_in_range(seq, max_var)
 		}
 	}
 
 	#[predicate]
 	fn consistent<I: Iterator<Item = Lit>>(lits: I) -> bool {
 		pearlite! {
-			exists<fin: &mut I, seq: _> lits.produces(seq, *fin) &&
-				fin.completed() && consistent(seq)
+			exists<seq: _> complete_seq(lits, seq) && consistent(seq)
 		}
 	}
 
 	#[predicate]
 	fn some_inconsistency<I: Iterator<Item = Lit>>(lits: I) -> bool {
 		pearlite! {
-			exists<fin: &mut I, seq: _> lits.produces(seq, *fin) &&
-				!consistent(seq)
+			exists<seq: _> partial_seq(lits, seq) && !consistent(seq)
 		}
 	}
 
@@ -204,11 +233,11 @@ impl Assignment {
 		Err(SatError::ProofVarOutOfRange) => Self::some_var_not_in_range(lits, @max_var),
 		_ => false
 	})]
-	#[ensures(forall<a: _> result == Ok(a) ==> (@a.state).len() == @max_var + 1)]
-	#[ensures(forall<a: _> result == Ok(a) ==> iter_consumed(lits))]
+	#[ensures(forall<asn: _> result == Ok(asn) ==> (@asn.state).len() == @max_var + 1)]
+	#[ensures(is_ok(result) ==> iter_consumed(lits))]
 	#[ensures(forall<asn: _> result == Ok(asn) ==>
-		exists<fin: &mut I, seq: _> lits.produces(seq, *fin) &&
-			fin.completed() && asn.maps_some_from(seq) && asn.maps_from(seq)
+		exists<seq: _> complete_seq(lits, seq) &&
+			asn.maps_some_from(seq) && asn.maps_from(seq)
 	)]
 	fn from_unchecked_lits<I: Iterator<Item = Lit>>(
 		lits: I,
@@ -285,33 +314,13 @@ pub type Clause = Vec<Lit>;
 // meanings
 #[requires(clauses.invariant())]
 #[requires(proof.invariant())]
-#[ensures(result == Ok(()) ==> iter_consumed(clauses) && iter_consumed(proof))]
-// All proof vars in range
-#[ensures(result == Ok(()) ==>
-	exists<fin: &mut ProofIt, seq: _> proof.produces(seq, *fin) && fin.completed() &&
-		vars_in_range(seq, @max_var)
-)]
-// Proof vars consistent
-#[ensures(result == Ok(()) ==>
-	exists<fin: &mut ProofIt, seq: _> proof.produces(seq, *fin) && fin.completed() &&
-		consistent(seq)
-)]
-// Right number of clauses consumed
-#[ensures(result == Ok(()) ==>
-	exists<fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) && fin.completed() &&
-		seq.len() == @num_clauses
-)]
-// All clause vars in range
-#[ensures(result == Ok(()) ==>
-	exists<fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) && fin.completed() &&
-		forall<i: _> 0 <= i && i < seq.len() ==> vars_in_range(@seq[i], @max_var)
-)]
-// Soundness
-#[ensures(result == Ok(()) ==>
-	exists<asn: Assignment, fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) &&
-		fin.completed() && ((@asn.state).len() == @max_var + 1) && seq.len() == @num_clauses &&
-			asn.satisfies(seq)
-)]
+#[ensures(is_ok(result) ==> iter_consumed(clauses))]
+#[ensures(is_ok(result) ==> iter_consumed(proof))]
+#[ensures(is_ok(result) ==> exists<seq: _> complete_seq(proof, seq) && vars_in_range(seq, @max_var))]
+#[ensures(is_ok(result) ==> exists<seq: _> complete_seq(proof, seq) && consistent(seq))]
+#[ensures(is_ok(result) ==> exists<seq: _> complete_seq(clauses, seq) && seq.len() == @num_clauses)]
+#[ensures(is_ok(result) ==> exists<seq: _> complete_seq(clauses, seq) && clauses_vars_in_range(seq, @max_var))]
+#[ensures(is_ok(result) ==> exists<seq: _, asn: Assignment> complete_seq(clauses, seq) && asn.satisfies(seq))]
 pub fn check_sat<ClauseIt, ProofIt>(
 	clauses: ClauseIt,
 	proof: ProofIt,
@@ -330,8 +339,9 @@ where
 	let mut clauses_read = 0;
 
 	#[invariant(iter_invar, iter.invariant())]
-	#[invariant(vars_in_range, forall<i: _> 0 <= i && i < produced.len() ==> vars_in_range(@produced[i], @max_var))]
-	#[invariant(clauses_read_len, produced.len() == @clauses_read && @clauses_read <= @num_clauses)]
+	#[invariant(vars_in_range, clauses_vars_in_range(produced.inner(), @max_var))]
+	#[invariant(len_invar, produced.len() == @clauses_read)]
+	#[invariant(num_clauses_check, @clauses_read <= @num_clauses)]
 	#[invariant(sat_status, assignment.satisfies(produced.inner()))]
 	for clause in clauses {
 		proof_assert!(clause == produced[produced.len() - 1]);
