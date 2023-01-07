@@ -158,6 +158,7 @@ impl Assignment {
 		}
 	}
 
+	// TODO: We still need a proof of consistency for completeness
 	#[requires(lits.invariant())]
 	#[ensures(match result {
 		Ok(_) => Self::vars_in_range(lits, @max_var),
@@ -201,11 +202,32 @@ impl Assignment {
 		Ok(Assignment { state: assignment })
 	}
 
+	#[predicate]
+	fn l_satisfies_lit(self, lit: Lit) -> bool {
+		pearlite! {
+			(@self.state)[lit.l_variable()] == Some(lit.l_polarity())
+		}
+	}
+
+	#[predicate]
+	fn l_satisfies_clause(self, clause: Seq<Lit>) -> bool {
+		pearlite! {
+			exists<i: _> 0 <= i && i < clause.len() &&
+				self.l_satisfies_lit(clause[i])
+		}
+	}
+
+	#[predicate]
+	fn satisfies(self, clauses: Seq<Clause>) -> bool {
+		pearlite! {
+			forall<i: _> 0 <= i && i < clauses.len() ==>
+				self.l_satisfies_clause(@clauses[i])
+		}
+	}
+
 	#[requires(lit.l_variable() < (@self.state).len())]
-	#[ensures(result ==
-		((@self.state)[lit.l_variable()] == Some(lit.l_polarity()))
-	)]
-	fn satisfies(&self, lit: Lit) -> bool {
+	#[ensures(result == self.l_satisfies_lit(lit))]
+	fn satisfies_lit(&self, lit: Lit) -> bool {
 		if let Some(assigned_pol) = self.state[lit.variable() as usize] {
 			if assigned_pol == lit.polarity() {
 				return true;
@@ -232,6 +254,11 @@ pub type Clause = Vec<Lit>;
 	exists<fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) && fin.completed() &&
 		forall<i: _> 0 <= i && i < seq.len() ==> vars_in_range(@seq[i], @max_var)
 )]
+#[ensures(result == Ok(()) ==>
+	exists<asn: Assignment, fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) &&
+		fin.completed() && ((@asn.state).len() == @max_var + 1) && seq.len() == @num_clauses &&
+			asn.satisfies(seq)
+)]
 pub fn check_sat<ClauseIt, ProofIt>(
 	clauses: ClauseIt,
 	proof: ProofIt,
@@ -252,17 +279,23 @@ where
 	#[invariant(iter_invar, iter.invariant())]
 	#[invariant(vars_in_range, forall<i: _> 0 <= i && i < produced.len() ==> vars_in_range(@produced[i], @max_var))]
 	#[invariant(clauses_read_len, produced.len() == @clauses_read && @clauses_read <= @num_clauses)]
+	#[invariant(sat_status, assignment.satisfies(produced.inner()))]
 	for clause in clauses {
+		proof_assert!(clause == produced[produced.len() - 1]);
+
 		let mut clause_sat = false;
 
 		#[invariant(iter_invar, iter.invariant())]
 		#[invariant(vars_in_range, vars_in_range(produced.inner(), @max_var))]
+		#[invariant(sat_status, clause_sat == assignment.l_satisfies_clause(produced.inner()))]
 		for lit in clause {
+			proof_assert!(lit == produced[produced.len() - 1]);
+
 			if !lit.in_range(max_var) {
 				return Err(SatError::VarOutOfRange);
 			}
 
-			if !clause_sat && assignment.satisfies(lit) {
+			if !clause_sat && assignment.satisfies_lit(lit) {
 				clause_sat = true;
 			}
 		}
@@ -281,8 +314,6 @@ where
 	if clauses_read != num_clauses {
 		return Err(SatError::WrongNumberOfClauses);
 	}
-
-	proof_assert!(clauses_read == num_clauses);
 
 	Ok(())
 }
