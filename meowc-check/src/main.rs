@@ -21,7 +21,7 @@ fn main() -> Result<()> {
 	let (dimacs, max_var, clauses) = dimacs_iter(args.dimacs_file)?;
 	let proof = proof_iter(args.proof_file)?;
 	match check_sat(dimacs, proof, max_var, clauses) {
-		Ok(_) => println!("s VERIFIED"),
+		Ok(()) => println!("s VERIFIED"),
 		Err(e) => {
 			println!("c {:?}", e);
 			println!("s NOT VERIFIED");

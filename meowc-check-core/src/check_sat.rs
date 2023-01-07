@@ -20,7 +20,8 @@ fn iter_consumed<I: Iterator>(iter: I) -> bool {
 #[cfg_attr(not(feature = "contracts"), derive(Debug))]
 pub enum SatError {
 	Inconsistent,
-	VarOutOfRange,
+	ProofVarOutOfRange,
+	FormulaVarOutOfRange,
 	WrongNumberOfClauses,
 	Incorrect,
 }
@@ -119,6 +120,14 @@ fn vars_in_range(lits: Seq<Lit>, max_var: Int) -> bool {
 	}
 }
 
+#[predicate]
+fn consistent(lits: Seq<Lit>) -> bool {
+	pearlite! {
+		forall<i: _, j: _> 0 <= i && i < lits.len() && 0 <= j && j < lits.len() ==>
+			!lits[i].conflicts_with(lits[j])
+	}
+}
+
 impl Assignment {
 	#[predicate]
 	fn vars_in_range<I: Iterator<Item = Lit>>(lits: I, max_var: Int) -> bool {
@@ -140,37 +149,66 @@ impl Assignment {
 	}
 
 	#[predicate]
-	fn consistent(lits: Seq<Lit>) -> bool {
+	fn consistent<I: Iterator<Item = Lit>>(lits: I) -> bool {
 		pearlite! {
-			// TODO: change j < i to j < lits.len() && j != i
-			forall<i: _, j: _> 0 <= i && i < lits.len() && 0 <= j && j < i ==>
-				!lits[i].conflicts_with(lits[j])
+			exists<fin: &mut I, seq: _> lits.produces(seq, *fin) &&
+				fin.completed() && consistent(seq)
 		}
 	}
 
 	#[predicate]
-	fn maps_to_some(lits: Seq<Lit>, assignment: Seq<Option<bool>>) -> bool {
+	fn some_inconsistency<I: Iterator<Item = Lit>>(lits: I) -> bool {
 		pearlite! {
-			forall<i: _> 0 <= i && i < lits.len() ==>
-			exists<v: _>
-				assignment[lits[i].l_variable()] == Some(v) &&
-				v == lits[i].l_polarity()
+			exists<fin: &mut I, seq: _> lits.produces(seq, *fin) &&
+				!consistent(seq)
 		}
 	}
 
-	// TODO: We still need a proof of consistency for completeness
+	#[predicate]
+	fn seq_maps_some_from(
+		assignment: Seq<Option<bool>>,
+		lits: Seq<Lit>,
+	) -> bool {
+		pearlite! {
+			forall<i: _> 0 <= i && i < lits.len() ==>
+			exists<p: _> assignment[lits[i].l_variable()] == Some(p) &&
+				p == lits[i].l_polarity()
+		}
+	}
+
+	#[predicate]
+	fn maps_some_from(self, lits: Seq<Lit>) -> bool {
+		pearlite! { Self::seq_maps_some_from(@self.state, lits) }
+	}
+
+	#[predicate]
+	fn seq_maps_from(assignment: Seq<Option<bool>>, lits: Seq<Lit>) -> bool {
+		pearlite! {
+			forall<i: _> 0 <= i && i < assignment.len() ==>
+				(exists<p: _> assignment[i] == Some(p)) ==
+				(exists<j: _> 0 <= j && j < lits.len() &&
+					(           i  ==      lits[j].l_variable()) &&
+					(assignment[i] == Some(lits[j].l_polarity())))
+		}
+	}
+
+	#[predicate]
+	fn maps_from(self, lits: Seq<Lit>) -> bool {
+		pearlite! { Self::seq_maps_from(@self.state, lits) }
+	}
+
 	#[requires(lits.invariant())]
 	#[ensures(match result {
-		Ok(_) => Self::vars_in_range(lits, @max_var),
-		Err(SatError::Inconsistent) => true,
-		Err(SatError::VarOutOfRange) => Self::some_var_not_in_range(lits, @max_var),
+		Ok(_) => Self::vars_in_range(lits, @max_var) && Self::consistent(lits),
+		Err(SatError::Inconsistent) => Self::some_inconsistency(lits),
+		Err(SatError::ProofVarOutOfRange) => Self::some_var_not_in_range(lits, @max_var),
 		_ => false
 	})]
 	#[ensures(forall<a: _> result == Ok(a) ==> (@a.state).len() == @max_var + 1)]
 	#[ensures(forall<a: _> result == Ok(a) ==> iter_consumed(lits))]
-	#[ensures(forall<a: _> result == Ok(a) ==>
+	#[ensures(forall<asn: _> result == Ok(asn) ==>
 		exists<fin: &mut I, seq: _> lits.produces(seq, *fin) &&
-			fin.completed() && Self::maps_to_some(seq, @a.state)
+			fin.completed() && asn.maps_some_from(seq) && asn.maps_from(seq)
 	)]
 	fn from_unchecked_lits<I: Iterator<Item = Lit>>(
 		lits: I,
@@ -181,17 +219,21 @@ impl Assignment {
 		#[invariant(iter_invar, iter.invariant())]
 		#[invariant(assignment_len_const, (@assignment).len() == @max_var + 1)]
 		#[invariant(vars_in_range, vars_in_range(produced.inner(), @max_var))]
-		#[invariant(maps_to_some, Self::maps_to_some(produced.inner(), @assignment))]
+		#[invariant(consistent, consistent(produced.inner()))]
+		#[invariant(maps_some_from, Self::seq_maps_some_from(@assignment, produced.inner()))]
+		#[invariant(maps_from, Self::seq_maps_from(@assignment, produced.inner()))]
 		for lit in lits {
+			proof_assert!(lit == produced[produced.len() - 1]);
+
 			if !lit.in_range(max_var) {
-				proof_assert!(!produced[produced.len() - 1].l_in_range(@max_var));
-				return Err(SatError::VarOutOfRange);
+				return Err(SatError::ProofVarOutOfRange);
 			}
 
 			let (variable, polarity) = lit.var_pol();
 
 			if let Some(assigned_pol) = assignment[variable as usize] {
 				if assigned_pol != polarity {
+					proof_assert!(exists<i: _> 0 <= i && i < produced.len() && lit.conflicts_with(produced[i]));
 					return Err(SatError::Inconsistent);
 				}
 			}
@@ -239,21 +281,32 @@ impl Assignment {
 
 pub type Clause = Vec<Lit>;
 
+// TODO: Tidy all of these up, prove completeness and add specification of error
+// meanings
 #[requires(clauses.invariant())]
 #[requires(proof.invariant())]
 #[ensures(result == Ok(()) ==> iter_consumed(clauses) && iter_consumed(proof))]
+// All proof vars in range
 #[ensures(result == Ok(()) ==>
 	exists<fin: &mut ProofIt, seq: _> proof.produces(seq, *fin) && fin.completed() &&
 		vars_in_range(seq, @max_var)
 )]
+// Proof vars consistent
+#[ensures(result == Ok(()) ==>
+	exists<fin: &mut ProofIt, seq: _> proof.produces(seq, *fin) && fin.completed() &&
+		consistent(seq)
+)]
+// Right number of clauses consumed
 #[ensures(result == Ok(()) ==>
 	exists<fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) && fin.completed() &&
 		seq.len() == @num_clauses
 )]
+// All clause vars in range
 #[ensures(result == Ok(()) ==>
 	exists<fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) && fin.completed() &&
 		forall<i: _> 0 <= i && i < seq.len() ==> vars_in_range(@seq[i], @max_var)
 )]
+// Soundness
 #[ensures(result == Ok(()) ==>
 	exists<asn: Assignment, fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) &&
 		fin.completed() && ((@asn.state).len() == @max_var + 1) && seq.len() == @num_clauses &&
@@ -292,7 +345,7 @@ where
 			proof_assert!(lit == produced[produced.len() - 1]);
 
 			if !lit.in_range(max_var) {
-				return Err(SatError::VarOutOfRange);
+				return Err(SatError::FormulaVarOutOfRange);
 			}
 
 			if !clause_sat && assignment.satisfies_lit(lit) {
