@@ -8,7 +8,7 @@ use std::{
 
 pub fn dimacs_iter<P: AsRef<Path>>(
 	filename: P,
-) -> Result<(impl Iterator<Item = Clause>, Var)> {
+) -> Result<(impl Iterator<Item = Clause>, Var, usize)> {
 	let lines = BufReader::new(File::open(filename)?).lines();
 	let mut lines = lines.skip_while(|l| l.as_ref().unwrap().starts_with("c"));
 	let problem: Vec<String> = lines
@@ -22,9 +22,9 @@ pub fn dimacs_iter<P: AsRef<Path>>(
 	assert!(problem.len() == 4);
 	assert!(problem[0] == "p");
 	assert!(problem[1] == "cnf");
-	let variables = problem[2].parse::<u32>()?;
+	let variables = problem[2].parse()?;
 	// TODO: Check number of clauses is right
-	let _clauses = problem[3].parse::<u32>()?;
+	let clauses = problem[3].parse()?;
 
 	// TODO: really we should iterate over numbers not lines, cos clauses can
 	// take multiple lines
@@ -41,7 +41,7 @@ pub fn dimacs_iter<P: AsRef<Path>>(
 			.collect::<Clause>()
 	});
 
-	Ok((lines, variables))
+	Ok((lines, variables, clauses))
 }
 
 pub fn proof_iter<P: AsRef<Path>>(

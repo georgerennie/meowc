@@ -18,9 +18,9 @@ fn main() -> Result<()> {
 	let args = Args::parse();
 
 	println!("c Checking SAT proof");
-	let (dimacs, max_var) = dimacs_iter(args.dimacs_file)?;
+	let (dimacs, max_var, clauses) = dimacs_iter(args.dimacs_file)?;
 	let proof = proof_iter(args.proof_file)?;
-	match check_sat(dimacs, proof, max_var) {
+	match check_sat(dimacs, proof, max_var, clauses) {
 		Ok(_) => println!("s VERIFIED"),
 		Err(e) => {
 			println!("c {:?}", e);

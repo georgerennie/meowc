@@ -21,6 +21,7 @@ fn iter_consumed<I: Iterator>(iter: I) -> bool {
 pub enum SatError {
 	Inconsistent,
 	VarOutOfRange,
+	WrongNumberOfClauses,
 	Incorrect,
 }
 
@@ -216,7 +217,6 @@ impl Assignment {
 
 pub type Clause = Vec<Lit>;
 
-// TODO: Check that the right number of clauses are read
 #[requires(clauses.invariant())]
 #[requires(proof.invariant())]
 #[ensures(result == Ok(()) ==> iter_consumed(clauses) && iter_consumed(proof))]
@@ -226,12 +226,17 @@ pub type Clause = Vec<Lit>;
 )]
 #[ensures(result == Ok(()) ==>
 	exists<fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) && fin.completed() &&
+		seq.len() == @num_clauses
+)]
+#[ensures(result == Ok(()) ==>
+	exists<fin: &mut ClauseIt, seq: _> clauses.produces(seq, *fin) && fin.completed() &&
 		forall<i: _> 0 <= i && i < seq.len() ==> vars_in_range(@seq[i], @max_var)
 )]
 pub fn check_sat<ClauseIt, ProofIt>(
 	clauses: ClauseIt,
 	proof: ProofIt,
 	max_var: Var,
+	num_clauses: usize,
 ) -> Result<(), SatError>
 where
 	ClauseIt: Iterator<Item = Clause>,
@@ -242,8 +247,11 @@ where
 		Ok(a) => a,
 	};
 
+	let mut clauses_read = 0;
+
 	#[invariant(iter_invar, iter.invariant())]
 	#[invariant(vars_in_range, forall<i: _> 0 <= i && i < produced.len() ==> vars_in_range(@produced[i], @max_var))]
+	#[invariant(clauses_read_len, produced.len() == @clauses_read && @clauses_read <= @num_clauses)]
 	for clause in clauses {
 		let mut clause_sat = false;
 
@@ -262,7 +270,19 @@ where
 		if !clause_sat {
 			return Err(SatError::Incorrect);
 		}
+
+		if clauses_read >= num_clauses {
+			return Err(SatError::WrongNumberOfClauses);
+		}
+
+		clauses_read += 1;
 	}
+
+	if clauses_read != num_clauses {
+		return Err(SatError::WrongNumberOfClauses);
+	}
+
+	proof_assert!(clauses_read == num_clauses);
 
 	Ok(())
 }
